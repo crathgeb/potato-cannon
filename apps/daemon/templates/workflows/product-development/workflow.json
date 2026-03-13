@@ -7,7 +7,7 @@
     {
       "id": "Refinement",
       "name": "Refinement",
-      "description": "Refine brainstormed ideas into clear, actionable requirements",
+      "description": "AI agents refine your brainstorm into clear requirements with adversarial review",
       "workers": [
         {
           "id": "refinement-ralph-loop",
@@ -46,7 +46,7 @@
     {
       "id": "Backlog",
       "name": "Backlog",
-      "description": "Approved requirements ready for architecture design",
+      "description": "Tickets auto-advance to the next phase",
       "workers": [],
       "transitions": {
         "next": null,
@@ -56,7 +56,7 @@
     {
       "id": "Architecture",
       "name": "Architecture",
-      "description": "Design technical architecture based on refinement",
+      "description": "AI agents design technical architecture with adversarial review",
       "workers": [
         {
           "id": "architecture-ralph-loop",
@@ -89,7 +89,7 @@
     {
       "id": "Architecture Review",
       "name": "Architecture Review",
-      "description": "Human review of architecture before specification",
+      "description": "Tickets auto-advance to the next phase",
       "workers": [],
       "transitions": {
         "next": null,
@@ -99,7 +99,7 @@
     {
       "id": "Specification",
       "name": "Specification",
-      "description": "Create detailed implementation specification with wave-based tickets",
+      "description": "AI agent creates a detailed implementation specification",
       "workers": [
         {
           "id": "specification-agent",
@@ -117,7 +117,7 @@
     {
       "id": "Specification Review",
       "name": "Specification Review",
-      "description": "Human review of specification before build",
+      "description": "Tickets auto-advance to the next phase",
       "workers": [],
       "transitions": {
         "next": null,
@@ -127,7 +127,7 @@
     {
       "id": "Build",
       "name": "Build",
-      "description": "Execute specification tickets in waves with QA validation",
+      "description": "AI agents implement code from the specification with review loops",
       "workers": [
         {
           "id": "taskmaster-agent",
@@ -192,7 +192,7 @@
     {
       "id": "Pull Requests",
       "name": "Pull Requests",
-      "description": "Create pull request for completed build",
+      "description": "AI agent creates a pull request for the completed work",
       "workers": [
         {
           "id": "pr-agent",
