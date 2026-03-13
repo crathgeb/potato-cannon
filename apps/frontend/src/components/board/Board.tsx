@@ -394,6 +394,7 @@ export function Board({ projectId }: BoardProps) {
                       onColorChange={(color) => handleSwimlaneColorChange(phase, color)}
                       wipLimit={currentProject?.wipLimits?.[phase]}
                       onWipLimitChange={(limit) => handleWipLimitChange(phase, limit)}
+                      phaseDescription={phaseConfig?.description}
                     />
                   )
                 })}
