@@ -26,6 +26,7 @@ interface BoardColumnProps {
   onColorChange?: (color: string | null) => void
   wipLimit?: number
   onWipLimitChange?: (limit: number | null) => void
+  phaseDescription?: string
 }
 
 export function BoardColumn({
@@ -40,7 +41,8 @@ export function BoardColumn({
   swimlaneColor,
   onColorChange,
   wipLimit,
-  onWipLimitChange
+  onWipLimitChange,
+  phaseDescription
 }: BoardColumnProps) {
   const openAddTicketModal = useAppStore((s) => s.openAddTicketModal)
   const showArchivedTickets = useAppStore((s) => s.showArchivedTickets)
@@ -57,8 +59,8 @@ export function BoardColumn({
   // Determine tooltip text
   const getTooltipText = () => {
     if (isMigrating) return 'Migration in progress...'
-    if (isAutomated) return 'Automated'
-    return 'Enable automation'
+    if (isAutomated) return phaseDescription ?? 'Automated'
+    return phaseDescription ?? 'Enable automation'
   }
 
   const handleColorChange = (color: string | null) => {

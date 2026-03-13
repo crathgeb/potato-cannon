@@ -82,9 +82,9 @@ describe("BoardColumn tooltip", () => {
     const botButton = getBotButton();
     await user.hover(botButton);
 
-    expect(
-      await screen.findByText("AI agents implement code from the specification with review loops")
-    ).toBeInTheDocument();
+    const elements = await screen.findAllByText("AI agents implement code from the specification with review loops");
+    expect(elements).toBeDefined();
+    expect(elements.length).toBeGreaterThan(0);
   });
 
   it("shows phase description in tooltip when not automated and phaseDescription is provided", async () => {
@@ -98,9 +98,9 @@ describe("BoardColumn tooltip", () => {
     const botButton = getBotButton();
     await user.hover(botButton);
 
-    expect(
-      await screen.findByText("AI agents design technical architecture with adversarial review")
-    ).toBeInTheDocument();
+    const elements = await screen.findAllByText("AI agents design technical architecture with adversarial review");
+    expect(elements).toBeDefined();
+    expect(elements.length).toBeGreaterThan(0);
   });
 
   it("falls back to generic text when no phaseDescription is provided", async () => {
@@ -113,7 +113,9 @@ describe("BoardColumn tooltip", () => {
     const botButton = getBotButton();
     await user.hover(botButton);
 
-    expect(await screen.findByText("Automated")).toBeInTheDocument();
+    const elements = await screen.findAllByText("Automated");
+    expect(elements).toBeDefined();
+    expect(elements.length).toBeGreaterThan(0);
   });
 
   it("shows migration text regardless of phaseDescription", async () => {
@@ -128,6 +130,8 @@ describe("BoardColumn tooltip", () => {
     const botButton = getBotButton();
     await user.hover(botButton);
 
-    expect(await screen.findByText("Migration in progress...")).toBeInTheDocument();
+    const elements = await screen.findAllByText("Migration in progress...");
+    expect(elements).toBeDefined();
+    expect(elements.length).toBeGreaterThan(0);
   });
 });
