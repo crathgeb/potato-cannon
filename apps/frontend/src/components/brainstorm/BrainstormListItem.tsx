@@ -71,7 +71,6 @@ export function BrainstormListItem({
               {brainstorm.name}
             </span>
             <StatusIndicator
-              status={brainstorm.status}
               hasUnseenQuestion={hasUnseenQuestion}
             />
           </div>
@@ -86,10 +85,8 @@ export function BrainstormListItem({
 }
 
 function StatusIndicator({
-  status,
   hasUnseenQuestion
 }: {
-  status: Brainstorm['status']
   hasUnseenQuestion: boolean
 }) {
   // Active brainstorm with unseen pending question - show unread indicator

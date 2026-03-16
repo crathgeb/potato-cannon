@@ -70,17 +70,15 @@ export function BrainstormCard({ brainstorm, projectId }: BrainstormCardProps) {
           <Clock className="h-3 w-3" />
           {timeAgo(brainstorm.updatedAt)}
         </span>
-        <StatusIndicator status={brainstorm.status} hasUnseenQuestion={hasUnseenQuestion} />
+        <StatusIndicator hasUnseenQuestion={hasUnseenQuestion} />
       </div>
     </button>
   )
 }
 
 function StatusIndicator({
-  status,
   hasUnseenQuestion
 }: {
-  status: Brainstorm['status']
   hasUnseenQuestion: boolean
 }) {
   if (hasUnseenQuestion) {
