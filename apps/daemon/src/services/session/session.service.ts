@@ -433,11 +433,23 @@ export class SessionService {
     // original session ID. The stored session already has the correct one.
     let claudeSessionIdCaptured = !!claudeResumeSessionId;
 
+    // Buffer for partial lines from PTY — the system init event is often
+    // larger than a single PTY chunk, so data arrives split across multiple
+    // onData calls.  We accumulate until we see a newline delimiter.
+    let ptyBuffer = "";
+
     proc.onData((data: string) => {
-      const lines = data.split("\n").filter(Boolean);
-      for (const line of lines) {
+      ptyBuffer += data;
+      const parts = ptyBuffer.split("\n");
+      // Last element is either empty (if data ended with \n) or an
+      // incomplete line — keep it in the buffer for the next onData call.
+      ptyBuffer = parts.pop() || "";
+
+      for (const line of parts) {
+        const trimmed = line.trimEnd();  // strip trailing \r from PTY
+        if (!trimmed) continue;
         try {
-          const event = JSON.parse(line);
+          const event = JSON.parse(trimmed);
           const logEntry = { ...event, timestamp: new Date().toISOString() };
           logStream.write(JSON.stringify(logEntry) + "\n");
           this.eventEmitter.emit("session:output", {
@@ -458,7 +470,7 @@ export class SessionService {
         } catch {
           const logEntry = {
             type: "raw",
-            content: line,
+            content: trimmed,
             timestamp: new Date().toISOString(),
           };
           logStream.write(JSON.stringify(logEntry) + "\n");
@@ -467,6 +479,23 @@ export class SessionService {
     });
 
     proc.onExit(({ exitCode }) => {
+      // Flush any remaining PTY buffer content
+      if (ptyBuffer.trim()) {
+        const trimmed = ptyBuffer.trimEnd();
+        try {
+          const event = JSON.parse(trimmed);
+          const logEntry = { ...event, timestamp: new Date().toISOString() };
+          logStream.write(JSON.stringify(logEntry) + "\n");
+          if (!claudeSessionIdCaptured && event.type === "system" && event.session_id) {
+            claudeSessionIdCaptured = true;
+            updateClaudeSessionId(sessionId, event.session_id);
+          }
+        } catch {
+          logStream.write(JSON.stringify({ type: "raw", content: trimmed, timestamp: new Date().toISOString() }) + "\n");
+        }
+        ptyBuffer = "";
+      }
+
       console.log(
         `[spawnClaudeSession] Agent ${agentType} exited with code: ${exitCode}`,
       );
