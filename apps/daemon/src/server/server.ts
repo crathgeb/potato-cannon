@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { EventEmitter } from "events";
 import { lock } from "proper-lockfile";
 
-import { DEFAULT_PORT } from "@potato-cannon/shared";
+import { DEFAULT_PORT, DEFAULT_HOST } from "@potato-cannon/shared";
 import { eventBus } from "../utils/event-bus.js";
 import { formatListenUrls } from "../utils/listen-urls.js";
 import { Logger } from "../utils/logger.js";
@@ -661,8 +661,10 @@ export async function main(): Promise<void> {
   const portValue =
     process.env.POTATO_DAEMON_PORT || globalConfig?.daemon?.port || DEFAULT_PORT;
   const port = typeof portValue === 'string' ? parseInt(portValue, 10) : portValue;
-  server = app.listen(port, '0.0.0.0', async () => {
-    const urls = formatListenUrls('0.0.0.0', port);
+  const host =
+    process.env.POTATO_DAEMON_HOST || globalConfig?.daemon?.host || DEFAULT_HOST;
+  server = app.listen(port, host, async () => {
+    const urls = formatListenUrls(host, port);
     console.log(`Dashboard running at:\n${urls.map((u) => `  ${u}`).join('\n')}`);
     await writePid(process.pid);
     await writeDaemonInfo({
@@ -916,21 +918,27 @@ async function shutdown(): Promise<void> {
 
 // CLI exports
 export async function startServer(
-  options: { port?: number; daemon?: boolean } = {},
+  options: { port?: number; host?: string; daemon?: boolean } = {},
 ): Promise<void> {
   const config = await loadGlobalConfig();
   const port = options.port || config?.daemon?.port || DEFAULT_PORT;
+  const host = options.host || config?.daemon?.host || DEFAULT_HOST;
 
   if (options.daemon) {
     const { spawn } = await import("child_process");
-    const { openSync } = await import("fs");
+    const { openSync, mkdirSync } = await import("fs");
     const { homedir } = await import("os");
     const logPath = path.join(homedir(), ".potato-cannon", "daemon.log");
+    mkdirSync(path.dirname(logPath), { recursive: true });
     const logFd = openSync(logPath, "a");
     const child = spawn(process.argv[0], [fileURLToPath(import.meta.url)], {
       detached: true,
       stdio: ["ignore", logFd, logFd],
-      env: { ...process.env, POTATO_DAEMON_PORT: port.toString() },
+      env: {
+        ...process.env,
+        POTATO_DAEMON_PORT: port.toString(),
+        POTATO_DAEMON_HOST: host,
+      },
     });
     child.unref();
     console.log(`Daemon started with PID ${child.pid}`);
