@@ -13,6 +13,8 @@ export interface Ticket {
   conversationId?: string
   pendingPhase?: string
   epicId?: string
+  blocked?: boolean
+  blockedAt?: string
 }
 
 export interface ArchiveResult {

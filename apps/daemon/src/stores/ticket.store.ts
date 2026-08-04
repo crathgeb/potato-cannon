@@ -55,6 +55,8 @@ interface TicketRow {
   worker_state: string | null;
   pending_phase: string | null;
   epic_id: string | null;
+  blocked: number;
+  blocked_at: string | null;
 }
 
 interface HistoryRow {
@@ -276,6 +278,13 @@ export class TicketStore {
       values.push(updates.pendingPhase || null);
     }
 
+    if (updates.blocked !== undefined && updates.blocked !== (existing.blocked ?? false)) {
+      fields.push("blocked = ?");
+      values.push(updates.blocked ? 1 : 0);
+      fields.push("blocked_at = ?");
+      values.push(updates.blocked ? now : null);
+    }
+
     if (updates.phase !== undefined && updates.phase !== existing.phase) {
       fields.push("phase = ?");
       values.push(updates.phase);
@@ -463,6 +472,8 @@ export class TicketStore {
       conversationId: row.conversation_id || undefined,
       pendingPhase: row.pending_phase || undefined,
       epicId: row.epic_id || undefined,
+      blocked: row.blocked === 1,
+      blockedAt: row.blocked_at || undefined,
     };
   }
 

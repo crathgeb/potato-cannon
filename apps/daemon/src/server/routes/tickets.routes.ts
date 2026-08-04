@@ -142,7 +142,7 @@ export function registerTicketRoutes(
     try {
       const projectId = decodeURIComponent(req.params.project);
       const ticketId = req.params.id;
-      const { force, ...ticketUpdates } = req.body as { phase?: TicketPhase; sessionId?: string; force?: boolean };
+      const { force, ...ticketUpdates } = req.body as { phase?: TicketPhase; sessionId?: string; force?: boolean; blocked?: boolean };
 
       const oldTicket = await getTicket(projectId, ticketId);
       const oldPhase = oldTicket.phase;
