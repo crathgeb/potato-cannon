@@ -23,7 +23,7 @@ import {
 import { DEFAULT_PHASES } from "../../types/index.js";
 import { readQuestion, writeResponse, clearQuestion } from "../../stores/chat.store.js";
 import { getActiveSessionForTicket } from "../../stores/session.store.js";
-import { getMessages } from "../../stores/conversation.store.js";
+import { getMessages, addMessage } from "../../stores/conversation.store.js";
 import { updateBrainstorm } from "../../stores/brainstorm.store.js";
 import type { SessionService } from "../../services/session/index.js";
 import type { Project } from "../../types/config.types.js";
@@ -420,6 +420,23 @@ export function registerTicketRoutes(
 
         const result = await saveArtifact(projectId, ticketId, filename, content);
 
+        // Record the edit in the ticket's own conversation - not just the
+        // manifest - so it shows up in the Activity tab and so a later
+        // resumed session's "recent activity since last turn" digest
+        // actually mentions it, instead of the file just silently changing
+        // underneath whatever runs next.
+        const ticket = await getTicket(projectId, ticketId);
+        if (ticket?.conversationId) {
+          const note =
+            result.wroteThrough === false
+              ? `Artifact "${filename}" was manually edited via the Cannon viewer, but the write-through to the real worktree file failed - the change may only be visible here.`
+              : `Artifact "${filename}" was manually edited via the Cannon viewer.`;
+          addMessage(ticket.conversationId, {
+            type: "notification",
+            text: note,
+          });
+        }
+
         // Notify listeners so the frontend can update artifact list
         eventBus.emit("ticket:updated", { projectId, ticketId });
 
@@ -427,6 +444,7 @@ export function registerTicketRoutes(
           ok: true,
           filename: result.filename,
           isNewVersion: result.isNewVersion,
+          wroteThrough: result.wroteThrough,
         });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });

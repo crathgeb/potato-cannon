@@ -197,7 +197,7 @@ export const api = {
   },
 
   updateTicketArtifact: (projectId: string, ticketId: string, filename: string, content: string) =>
-    request<{ ok: true; filename: string; isNewVersion: boolean }>(
+    request<{ ok: true; filename: string; isNewVersion: boolean; wroteThrough: boolean | null }>(
       `/api/tickets/${encodeURIComponent(projectId)}/${ticketId}/artifacts/${encodeURIComponent(filename)}`,
       {
         method: 'PUT',

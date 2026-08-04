@@ -752,7 +752,7 @@ export async function saveArtifact(
     description?: string;
     path?: string;
   } = {}
-): Promise<{ filename: string; path: string; isNewVersion: boolean }> {
+): Promise<{ filename: string; path: string; isNewVersion: boolean; wroteThrough: boolean | null }> {
   const artifactsDir = getTicketArtifactsDir(projectId, ticketId);
   await fs.mkdir(artifactsDir, { recursive: true });
 
@@ -787,10 +787,16 @@ export async function saveArtifact(
       path: existing.path,
     });
 
-    // Update current entry with new metadata
+    // Update current entry with new metadata. Only overwrite `path` when a
+    // new one is explicitly given - previously this unconditionally set it
+    // to `metadata.path`, which is undefined on a plain manual edit (the
+    // route doesn't pass metadata), silently erasing the link to the real
+    // worktree file on the very first edit.
     existing.savedAt = now;
     existing.description = metadata.description || existing.description;
-    existing.path = metadata.path;
+    if (metadata.path !== undefined) {
+      existing.path = metadata.path;
+    }
     if (metadata.type) {
       existing.type = metadata.type;
     }
@@ -807,13 +813,32 @@ export async function saveArtifact(
     };
   }
 
-  // Write the new content
+  // Write the new content to Cannon's own copy (what the viewer/editor reads)
   await fs.writeFile(filePath, content);
 
   // Save manifest
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
-  return { filename, path: filePath, isNewVersion };
+  // Write through to the real source file too, if this artifact is backed
+  // by one - otherwise a manual edit here only ever updates Cannon's own
+  // display copy, and any agent that later reads the real file (which is
+  // all of them - they operate on the actual worktree, not this cache)
+  // never sees the edit at all.
+  const realPath = manifest[filename].path;
+  let wroteThrough: boolean | null = null;
+  if (realPath && realPath !== filePath) {
+    try {
+      await fs.writeFile(realPath, content);
+      wroteThrough = true;
+    } catch (err) {
+      wroteThrough = false;
+      console.error(
+        `[saveArtifact] Failed to write through to real path ${realPath}: ${(err as Error).message}`
+      );
+    }
+  }
+
+  return { filename, path: filePath, isNewVersion, wroteThrough };
 }
 
 export async function getArtifactContent(
