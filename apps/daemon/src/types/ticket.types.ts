@@ -32,6 +32,7 @@ export interface UpdateTicketInput {
   sessionId?: string;
   pendingPhase?: string | null;
   reason?: string;
+  blocked?: boolean;
 }
 
 export type ArtifactType =

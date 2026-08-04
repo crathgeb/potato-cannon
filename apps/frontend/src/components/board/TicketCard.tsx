@@ -111,7 +111,8 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
           'relative group',
           isProcessing && 'ticket-card-processing',
           isProcessing && isSelected && 'ticket-card-selected',
-          isArchiving && 'opacity-50 pointer-events-none cursor-not-allowed'
+          isArchiving && 'opacity-50 pointer-events-none cursor-not-allowed',
+          ticket.blocked && 'border-2 border-red-500 ring-1 ring-red-500/50'
         )}
       >
       {/* Archive button - only for Done phase */}

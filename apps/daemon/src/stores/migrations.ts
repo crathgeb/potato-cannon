@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-const CURRENT_SCHEMA_VERSION = 13;
+const CURRENT_SCHEMA_VERSION = 14;
 
 /**
  * Run database migrations.
@@ -59,6 +59,10 @@ export function runMigrations(db: Database.Database): void {
 
   if (version < 13) {
     migrateV13(db);
+  }
+
+  if (version < 14) {
+    migrateV14(db);
   }
 
   db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`);
@@ -553,5 +557,20 @@ function migrateV13(db: Database.Database): void {
   const columns = db.pragma("table_info(ticket_history)") as { name: string }[];
   if (!columns.some((c) => c.name === "reason")) {
     db.exec(`ALTER TABLE ticket_history ADD COLUMN reason TEXT`);
+  }
+}
+
+/**
+ * V14: Add blocked/blocked_at columns to tickets - an orthogonal flag
+ * (bright red outline on the card, toggled from the ticket detail header)
+ * separate from the "Blocked" phase, which stays as-is for now.
+ */
+function migrateV14(db: Database.Database): void {
+  const columns = db.pragma("table_info(tickets)") as { name: string }[];
+  if (!columns.some((c) => c.name === "blocked")) {
+    db.exec(`ALTER TABLE tickets ADD COLUMN blocked INTEGER DEFAULT 0`);
+  }
+  if (!columns.some((c) => c.name === "blocked_at")) {
+    db.exec(`ALTER TABLE tickets ADD COLUMN blocked_at TEXT`);
   }
 }
