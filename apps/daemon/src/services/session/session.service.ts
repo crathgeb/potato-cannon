@@ -26,10 +26,12 @@ import {
   endStoredSession,
   getLatestClaudeSessionId,
   getLatestClaudeSessionIdForTicket,
+  getLatestSessionEndedAtForTicket,
   updateClaudeSessionId,
   getActiveSessionForBrainstorm,
   getActiveSessionForTicket,
 } from "../../stores/session.store.js";
+import { getMessages } from "../../stores/conversation.store.js";
 import {
   readResponse,
   readQuestion,
@@ -62,6 +64,46 @@ import {
 import { formatTaskContext } from "./loops/task-loop.js";
 import { getPendingVerdict } from "../../server/routes/ralph.routes.js";
 import { isPhaseAtWipLimit } from "./wip.js";
+
+const MAX_RECENT_ACTIVITY_MESSAGE_LENGTH = 2000;
+
+/**
+ * Format anything posted to this ticket's conversation after its last
+ * session ended - comments, ticket-wide Q&A exchanges, questions/answers -
+ * as a plain delta for a resumed session's next prompt. Returns null when
+ * there's nothing new or no prior session to diff against (a fresh ticket
+ * has no "since last time").
+ */
+function formatRecentActivitySinceLastSession(ticket: {
+  id: string;
+  conversationId?: string;
+}): string | null {
+  if (!ticket.conversationId) return null;
+
+  const cutoff = getLatestSessionEndedAtForTicket(ticket.id);
+  if (!cutoff) return null;
+
+  const messages = getMessages(ticket.conversationId).filter(
+    (m) => m.timestamp > cutoff
+  );
+  if (messages.length === 0) return null;
+
+  const lines = messages.map((m) => {
+    const text =
+      m.text.length > MAX_RECENT_ACTIVITY_MESSAGE_LENGTH
+        ? `${m.text.slice(0, MAX_RECENT_ACTIVITY_MESSAGE_LENGTH)}... [truncated]`
+        : m.text;
+    return `**[${m.timestamp}] ${m.type}:** ${text}`;
+  });
+
+  return [
+    "## Recent activity since your last turn",
+    "",
+    "Someone interacted with this ticket after your last session ended (a comment, a ticket-wide Q&A exchange, or similar) - read it before proceeding. It may or may not be relevant to what you're about to do; use your own judgment.",
+    "",
+    ...lines,
+  ].join("\n");
+}
 
 export class SessionService {
   private sessions: Map<string, ActiveSession> = new Map();
@@ -1101,24 +1143,63 @@ export class SessionService {
       throw new Error(`Agent ${agentWorker.source} not found in template`);
     }
 
-    // Build prompt with task context if provided
-    let prompt = agentDefinition.prompt;
-    if (taskContext) {
-      prompt += `\n\n---\n\n${formatTaskContext(taskContext)}`;
+    // resumePrevious: continue the ticket's actual most recent Claude
+    // session instead of spawning fresh. The resumed session already has
+    // full conversation context (what spec-kit itself assumes), so the
+    // prompt here is a short instruction, not a rebuilt context dump - the
+    // agent .md file for a resumed phase should just say what to do next
+    // (e.g. "human approved - now invoke the speckit-plan skill"), not
+    // restate ticket/phase context the session already has.
+    let claudeResumeSessionId: string | undefined;
+    let prompt: string;
+    if (agentWorker.resumePrevious) {
+      claudeResumeSessionId = getLatestClaudeSessionIdForTicket(ticketId) ?? undefined;
+      if (!claudeResumeSessionId) {
+        console.error(
+          `[spawnAgentWorker] resumePrevious set for ${agentWorker.source} but no prior session found for ticket ${ticketId} - falling back to a fresh spawn with full context.`
+        );
+      }
     }
 
-    // Build ticket context with optional ralph feedback injection
-    const ticketContext = await buildAgentPrompt(
-      projectId,
-      ticketId,
-      ticket,
-      phase,
-      agentWorker,
-      images,
-      undefined, // agentPrompt - we already have it
-      ralphContext
-    );
-    prompt += `\n\n---\n\n${ticketContext}`;
+    if (claudeResumeSessionId) {
+      prompt = agentDefinition.prompt;
+      if (taskContext) {
+        prompt += `\n\n---\n\n${formatTaskContext(taskContext)}`;
+      }
+
+      // The resumed Claude session only remembers what happened inside its
+      // own process - a comment, ticket-wide Q&A exchange, or artifact edit
+      // made through the Cannon UI while nothing was running (e.g. between
+      // Gate 2 and a Demote) never reached it. Inject a plain delta of what
+      // changed since this ticket's last session ended, so re-running a
+      // phase (Promote/Demote) actually has the new information rather than
+      // silently redoing the same thing with stale context. This is a delta,
+      // not a context rebuild - keeps the "short instruction, not a dump"
+      // design above intact.
+      const recentActivity = formatRecentActivitySinceLastSession(ticket);
+      if (recentActivity) {
+        prompt += `\n\n---\n\n${recentActivity}`;
+      }
+    } else {
+      // Build prompt with task context if provided
+      prompt = agentDefinition.prompt;
+      if (taskContext) {
+        prompt += `\n\n---\n\n${formatTaskContext(taskContext)}`;
+      }
+
+      // Build ticket context with optional ralph feedback injection
+      const ticketContext = await buildAgentPrompt(
+        projectId,
+        ticketId,
+        ticket,
+        phase,
+        agentWorker,
+        images,
+        undefined, // agentPrompt - we already have it
+        ralphContext
+      );
+      prompt += `\n\n---\n\n${ticketContext}`;
+    }
 
     const meta: SessionMeta = {
       projectId,
@@ -1150,6 +1231,7 @@ export class SessionService {
       0,
       agentWorker.disallowTools,
       resolvedModel ?? undefined,
+      claudeResumeSessionId,
     );
   }
 

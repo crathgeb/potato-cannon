@@ -185,6 +185,25 @@ export class SessionStore {
   }
 
   /**
+   * When the same ticket resumes, this is the cutoff for "new since you last
+   * ran" - the end time of the same session getLatestClaudeSessionIdForTicket
+   * would resume. Same WHERE/ORDER as that query so it always refers to the
+   * identical row; a session still running (ended_at NULL) can't be resumed
+   * from anyway, so this only ever matters once ended_at is set.
+   */
+  getLatestSessionEndedAtForTicket(ticketId: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT ended_at FROM sessions
+         WHERE ticket_id = ? AND claude_session_id IS NOT NULL
+         ORDER BY started_at DESC, ROWID DESC LIMIT 1`
+      )
+      .get(ticketId) as { ended_at: string | null } | undefined;
+
+    return row?.ended_at || null;
+  }
+
+  /**
    * Delete all sessions for a ticket that occurred in or after the specified phases.
    * Also ends any active sessions for these phases.
    */
@@ -263,6 +282,10 @@ export function getLatestClaudeSessionId(brainstormId: string): string | null {
 
 export function getLatestClaudeSessionIdForTicket(ticketId: string): string | null {
   return new SessionStore(getDatabase()).getLatestClaudeSessionIdForTicket(ticketId);
+}
+
+export function getLatestSessionEndedAtForTicket(ticketId: string): string | null {
+  return new SessionStore(getDatabase()).getLatestSessionEndedAtForTicket(ticketId);
 }
 
 export function updateClaudeSessionId(

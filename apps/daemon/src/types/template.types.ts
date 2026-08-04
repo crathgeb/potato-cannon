@@ -21,6 +21,18 @@ export interface AgentWorker extends BaseWorker {
   source: string;
   disallowTools?: string[];
   model?: ModelSpec;
+  // When true, this phase resumes the ticket's most recent Claude session
+  // (via --resume) instead of spawning a fresh one with a full context
+  // dump. For a real spec-kit ticket, this is what lets Specify -> Clarify
+  // -> Plan -> Tasks -> Analyze -> Implement be one continuous session
+  // that actually remembers everything, the way spec-kit itself assumes -
+  // rather than disconnected phase-agents reconstructing context from
+  // written artifacts each time (which is what caused the worktree/
+  // directory mismatch bug: those artifacts lived in a different worktree
+  // than the one a later phase created). Every other Cannon workflow
+  // (product-development, homesflow-sdd) leaves this unset and is
+  // unaffected - fresh-spawn-per-phase stays the default.
+  resumePrevious?: boolean;
 }
 
 export interface AnswerBotWorker extends BaseWorker {
