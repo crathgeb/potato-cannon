@@ -102,6 +102,23 @@ export async function ensureWorktree(
     }
 
     console.log(`Worktree created at ${worktreePath}`);
+
+    // .claude/ is commonly gitignored (local agent config, skills, etc.),
+    // so `git worktree add` never brings it along even though it's exactly
+    // what a Claude Code session running inside the worktree needs to find
+    // project-level skills. Copy it over explicitly - best-effort, since a
+    // missing/failed copy shouldn't block the worktree from being usable.
+    const sourceClaudeDir = path.join(projectPath, ".claude");
+    const worktreeClaudeDir = path.join(worktreePath, ".claude");
+    if (existsSync(sourceClaudeDir) && !existsSync(worktreeClaudeDir)) {
+      try {
+        await fs.cp(sourceClaudeDir, worktreeClaudeDir, { recursive: true });
+        console.log(`Copied .claude/ into worktree at ${worktreeClaudeDir}`);
+      } catch (copyError) {
+        console.warn(`[worktree] Failed to copy .claude/ into worktree: ${(copyError as Error).message}`);
+      }
+    }
+
     return worktreePath;
   } catch (error) {
     console.error(`Failed to create worktree: ${(error as Error).message}`);
