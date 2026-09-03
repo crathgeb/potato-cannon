@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Send, Loader2, AlertCircle, Bell, Paperclip, Bot, Brain } from 'lucide-react'
+import { Send, Loader2, AlertCircle, Bell, Paperclip, Bot, Brain, ChevronUp, ChevronDown } from 'lucide-react'
 import { renderMarkdown } from '@/lib/markdown'
 import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -41,6 +41,12 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null)
   const [currentActivity, setCurrentActivity] = useState<string | null>(null)
   const [currentPhase, setCurrentPhase] = useState<string | null>(null)
+  // Tracks an on-demand ticket-wide Q&A session (see ticket-chat.routes.ts) -
+  // separate from isAgentActive's phase-worker sessions. Reset whenever the
+  // phase actually changes, so a stale contextId from a previous phase's
+  // conversation never gets reused for a --resume that no longer makes sense.
+  const [ticketChatContextId, setTicketChatContextId] = useState<string | null>(null)
+  const ticketChatContextIdRef = useRef<string | null>(null)
   const isProcessing = useAppStore((s) => s.isTicketProcessing(projectId, ticketId))
   const isPending = useAppStore((s) => s.isTicketPending(projectId, ticketId))
   const isAgentActive = isProcessing || isPending
@@ -179,6 +185,31 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
     }
   }, [projectId, ticketId, propPhase])
 
+  // Reset any ticket-chat session when the phase actually changes - a
+  // contextId from a previous phase's conversation shouldn't be resumed
+  // once the ticket has moved on.
+  const lastPhaseRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (lastPhaseRef.current !== null && lastPhaseRef.current !== currentPhase) {
+      setTicketChatContextId(null)
+    }
+    lastPhaseRef.current = currentPhase
+  }, [currentPhase])
+
+  useEffect(() => {
+    ticketChatContextIdRef.current = ticketChatContextId
+  }, [ticketChatContextId])
+
+  // End the ticket-chat session (if any) when this tab unmounts, same
+  // cleanup pattern as ArtifactChat.tsx.
+  useEffect(() => {
+    return () => {
+      if (ticketChatContextIdRef.current) {
+        api.endTicketChat(projectId, ticketId, ticketChatContextIdRef.current).catch(console.error)
+      }
+    }
+  }, [projectId, ticketId])
+
   const handleSend = useCallback(async (text: string) => {
     if (!text.trim() || isSubmitting) return
 
@@ -198,8 +229,24 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
     )
 
     try {
-      await api.sendTicketInput(projectId, ticketId, messageText)
-      setIsWaitingForResponse(true)
+      if (isAgentActive) {
+        await api.sendTicketInput(projectId, ticketId, messageText)
+        setIsWaitingForResponse(true)
+      } else if (ticketChatContextId) {
+        // Continuing an existing ticket-wide Q&A conversation (see
+        // ticket-chat.routes.ts) - a real follow-up, not a fresh question.
+        await api.sendTicketChatInput(projectId, ticketId, ticketChatContextId, messageText)
+        setIsWaitingForResponse(true)
+      } else {
+        // No agent running (e.g. a manual review gate) - start a ticket-wide
+        // Q&A session instead of just posting a note. The answer arrives
+        // through the same useTicketMessage SSE subscription as everything
+        // else in this feed, since ticket-chat sessions carry the real
+        // ticketId through to askAsync same as phase agents do.
+        const response = await api.startTicketChat(projectId, ticketId, messageText)
+        setTicketChatContextId(response.contextId)
+        setIsWaitingForResponse(true)
+      }
     } catch (error) {
       // Add error message
       const errorMessage: ChatMessage = {
@@ -214,7 +261,7 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
       setIsSubmitting(false)
       textareaRef.current?.focus()
     }
-  }, [projectId, ticketId, isSubmitting, queryClient])
+  }, [projectId, ticketId, isSubmitting, isAgentActive, ticketChatContextId, queryClient])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -265,6 +312,7 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
               <MessageBubble
                 key={index}
                 message={message}
+                isLast={index === messages.length - 1}
                 onArtifactClick={(filename, description) => {
                   setSelectedArtifact({
                     filename,
@@ -316,28 +364,28 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={isAgentActive ? "Type your response..." : "No agent is running for this phase"}
+              placeholder={isAgentActive ? "Type your response..." : "Ask about this ticket..."}
               className="min-h-[44px] max-h-[120px] resize-none"
-              disabled={!isAgentActive || isSubmitting}
+              disabled={isSubmitting}
             />
             <Button
               onClick={() => handleSend(input)}
-              disabled={!isAgentActive || !input.trim() || isSubmitting}
+              disabled={!input.trim() || isSubmitting}
               size="icon"
               className="shrink-0 self-end"
             >
-              {isSubmitting ? (
+              {isSubmitting || (isWaitingForResponse && !isAgentActive) ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
               )}
             </Button>
           </div>
-          {isAgentActive && (
-            <p className="text-xs text-text-muted mt-2 px-4">
-              Press Enter to send, Shift+Enter for new line
-            </p>
-          )}
+          <p className="text-xs text-text-muted mt-2 px-4">
+            {isAgentActive
+              ? "Press Enter to send, Shift+Enter for new line"
+              : "No agent running - this asks a Q&A agent about the ticket, not a phase agent"}
+          </p>
         </div>
       </div>
 
@@ -354,15 +402,31 @@ export function ActivityTab({ projectId, ticketId, currentPhase: propPhase, hist
 
 interface MessageBubbleProps {
   message: ChatMessage
+  isLast?: boolean
   onArtifactClick?: (filename: string, description?: string) => void
 }
 
-function MessageBubble({ message, onArtifactClick }: MessageBubbleProps) {
+// Same heuristic as DetailsTab's description "See more" toggle - keep the
+// two consistent rather than inventing a second threshold.
+function needsCollapse(text?: string): boolean {
+  if (!text) return false
+  return text.length > 200 || text.split('\n').length > 5
+}
+
+function MessageBubble({ message, isLast, onArtifactClick }: MessageBubbleProps) {
   const isUser = message.type === 'user'
   const isError = message.type === 'error'
   const isNotification = message.type === 'notification'
   const isArtifact = message.type === 'artifact'
   const isQuestion = message.type === 'question'
+
+  // Only text-bearing bubbles (user/notification/question/error) collapse -
+  // artifact cards are already compact. Every message starts expanded
+  // except older long ones, which start collapsed so the feed isn't
+  // dominated by a wall of agent commentary - the most recent message is
+  // always shown in full since that's almost always what you're there to read.
+  const collapsible = !isArtifact && needsCollapse(message.text)
+  const [isExpanded, setIsExpanded] = useState(Boolean(isLast))
 
   const renderedContent = useMemo(() => {
     if (!isQuestion || !message.text) return null
@@ -434,25 +498,47 @@ function MessageBubble({ message, onArtifactClick }: MessageBubbleProps) {
             <span className="text-xs font-medium">Error</span>
           </div>
         )}
-        {isQuestion && renderedContent ? (
-          <div
-            className="prose prose-sm prose-invert max-w-none text-text-secondary break-words
-              [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0
-              [&_a]:text-accent [&_a]:no-underline hover:[&_a]:underline
-              [&_code]:bg-bg-tertiary [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded
-              [&_pre]:bg-bg-tertiary [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto
-              [&_h1]:text-lg [&_h1]:text-text-primary [&_h1]:mt-4 [&_h1]:mb-2
-              [&_h2]:text-base [&_h2]:text-text-primary [&_h2]:mt-4 [&_h2]:mb-2
-              [&_h3]:text-sm [&_h3]:text-text-primary [&_h3]:mt-3 [&_h3]:mb-1
-              [&_blockquote]:border-l-2 [&_blockquote]:border-accent [&_blockquote]:pl-4 [&_blockquote]:italic
-              [&_table]:w-full [&_th]:text-left [&_th]:p-2 [&_th]:border-b [&_th]:border-border
-              [&_td]:p-2 [&_td]:border-b [&_td]:border-border"
-            dangerouslySetInnerHTML={{ __html: renderedContent }}
-          />
-        ) : (
-          <p className="text-sm whitespace-pre-wrap break-words">
-            <Linkify text={message.text || ''} />
-          </p>
+        <div className={cn(collapsible && !isExpanded && 'max-h-[100px] overflow-hidden')}>
+          {isQuestion && renderedContent ? (
+            <div
+              className="prose prose-sm prose-invert max-w-none text-text-secondary break-words
+                [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:my-0
+                [&_a]:text-accent [&_a]:no-underline hover:[&_a]:underline
+                [&_code]:bg-bg-tertiary [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded
+                [&_pre]:bg-bg-tertiary [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto
+                [&_h1]:text-lg [&_h1]:text-text-primary [&_h1]:mt-4 [&_h1]:mb-2
+                [&_h2]:text-base [&_h2]:text-text-primary [&_h2]:mt-4 [&_h2]:mb-2
+                [&_h3]:text-sm [&_h3]:text-text-primary [&_h3]:mt-3 [&_h3]:mb-1
+                [&_blockquote]:border-l-2 [&_blockquote]:border-accent [&_blockquote]:pl-4 [&_blockquote]:italic
+                [&_table]:w-full [&_th]:text-left [&_th]:p-2 [&_th]:border-b [&_th]:border-border
+                [&_td]:p-2 [&_td]:border-b [&_td]:border-border"
+              dangerouslySetInnerHTML={{ __html: renderedContent }}
+            />
+          ) : (
+            <p className="text-sm whitespace-pre-wrap break-words">
+              <Linkify text={message.text || ''} />
+            </p>
+          )}
+        </div>
+        {collapsible && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="mt-1 h-auto py-1 px-2 text-text-muted hover:text-text-secondary -ml-2"
+          >
+            {isExpanded ? (
+              <>
+                <ChevronUp className="h-3 w-3" />
+                Show less
+              </>
+            ) : (
+              <>
+                <ChevronDown className="h-3 w-3" />
+                Show more
+              </>
+            )}
+          </Button>
         )}
         {message.timestamp && (
           <p className="text-xs opacity-60 mt-1">

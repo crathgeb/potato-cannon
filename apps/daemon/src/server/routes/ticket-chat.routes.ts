@@ -9,7 +9,7 @@ import {
   clearQuestion,
   clearResponse,
 } from "../../stores/chat.store.js";
-import { listArtifacts, getTicket, getArtifactContent } from "../../stores/ticket.store.js";
+import { listArtifacts, getTicket } from "../../stores/ticket.store.js";
 import { addMessage } from "../../stores/conversation.store.js";
 import { tryLoadAgentDefinition } from "../../services/session/index.js";
 import { runAdhocChatProcess, buildAdhocChatArgs } from "../../services/session/adhoc-chat-runner.js";
@@ -19,19 +19,30 @@ import type { Project } from "../../types/config.types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function registerArtifactChatRoutes(
+// Ticket-wide Q&A - the sibling of artifact-chat, scoped to the ticket as a
+// whole rather than one artifact. Added because the ticket's general
+// Activity box only ever posted one-way notes when no phase agent was
+// running - there was no way for someone reviewing a ticket to actually
+// ask about it (status, where evidence lives, why a gate said what it
+// said) and get a real answer. Shares the exact same underlying mechanism
+// as artifact-chat (adhoc-chat-runner.ts), including the fixes that took
+// several rounds to get right there: session registration in the shared
+// `sessions` table (needed for --resume), a persistent line buffer across
+// PTY read chunks (needed for claude_session_id capture), and a mandatory
+// chat_ask requirement in the agent prompt (needed so answers are visible
+// to the polling panel instead of silently lost as plain text).
+export function registerTicketChatRoutes(
   app: Express,
   sessionService: SessionService,
   getProjects: () => Map<string, Project>
 ): void {
-  // Start artifact chat session
+  // Start ticket chat session
   app.post(
-    "/api/artifact-chat/:project/:ticket/:artifact/start",
+    "/api/ticket-chat/:project/:ticket/start",
     async (req: Request, res: Response) => {
       try {
         const projectId = decodeURIComponent(req.params.project);
         const ticketId = req.params.ticket;
-        const artifactFilename = decodeURIComponent(req.params.artifact);
         const { message } = req.body as { message?: string };
 
         if (!message) {
@@ -39,7 +50,6 @@ export function registerArtifactChatRoutes(
           return;
         }
 
-        // Validate project exists
         const projects = getProjects();
         const project = projects.get(projectId);
         if (!project) {
@@ -47,88 +57,65 @@ export function registerArtifactChatRoutes(
           return;
         }
 
-        // Validate artifact exists
-        const artifacts = await listArtifacts(projectId, ticketId);
-        const artifact = artifacts.find((a) => a.filename === artifactFilename);
-        if (!artifact) {
-          res.status(404).json({ error: "Artifact not found" });
+        const ticket = await getTicket(projectId, ticketId);
+        if (!ticket) {
+          res.status(404).json({ error: "Ticket not found" });
           return;
         }
 
-        // Check for existing active session
-        const existingSession = artifactChatStore.getActiveSessionForArtifact(
+        const existingSession = artifactChatStore.getActiveSessionForTicket(
           projectId,
-          ticketId,
-          artifactFilename
+          ticketId
         );
         if (existingSession) {
           res.status(409).json({
-            error: "Active session already exists for this artifact",
+            error: "Active session already exists for this ticket",
             contextId: existingSession.contextId,
           });
           return;
         }
 
-        // Create session in store
-        const session = artifactChatStore.createSession(
-          projectId,
-          ticketId,
-          artifactFilename
-        );
+        const session = artifactChatStore.createSession(projectId, ticketId);
 
-        // Get ticket and artifact content for prompt
-        const ticket = await getTicket(projectId, ticketId);
-        const artifactContent = await getArtifactContent(
-          projectId,
-          ticketId,
-          artifactFilename
-        );
-
-        // Load agent definition
         const agentDef = await tryLoadAgentDefinition(
           projectId,
-          "agents/artifact-qa.md"
+          "agents/ticket-qa.md"
         );
         if (!agentDef) {
           artifactChatStore.deleteSession(session.contextId);
-          res.status(500).json({ error: "Artifact Q&A agent not found" });
+          res.status(500).json({ error: "Ticket Q&A agent not found" });
           return;
         }
 
-        // Build prompt with context
-        const prompt = buildArtifactChatPrompt(
+        const artifacts = await listArtifacts(projectId, ticketId);
+
+        const prompt = buildTicketChatPrompt(
           agentDef.prompt,
           projectId,
           ticketId,
           ticket.title,
           ticket.description || "",
-          artifactFilename,
-          artifactContent,
+          ticket.phase,
+          artifacts,
           message
         );
 
-        // Persist the actual question into the ticket's real conversation,
-        // tagged with which artifact it's about - previously this only
-        // ever lived in the panel's own local browser state, so it was
-        // lost on close/reopen (and the answer, saved via chat_ask, had no
-        // way to be matched back to this artifact on refetch either).
-        persistArtifactUserMessage(ticket.conversationId, projectId, ticketId, artifactFilename, message);
+        // Persist the actual question into the ticket's real conversation -
+        // previously it only ever went into the agent's prompt text, never
+        // into the saved history. It appeared to work because of the
+        // frontend's optimistic local update, then silently vanished the
+        // moment the agent's answer arrived and the UI refetched real
+        // server-side history: the question was never actually in it.
+        persistUserMessage(ticket.conversationId, projectId, ticketId, message);
 
-        // Spawn Claude session
-        await spawnArtifactChatSession(
-          session,
-          prompt,
-          project.path,
-          projectId,
-          ticketId
-        );
+        await spawnTicketChatSession(session, prompt, project.path, projectId, ticketId);
 
         res.json({
           sessionId: session.sessionId,
           contextId: session.contextId,
         });
       } catch (error) {
-        console.error("[artifact-chat/start] Error:", error);
+        console.error("[ticket-chat/start] Error:", error);
         res.status(500).json({ error: (error as Error).message });
       }
     }
@@ -136,7 +123,7 @@ export function registerArtifactChatRoutes(
 
   // Get pending question
   app.get(
-    "/api/artifact-chat/:project/:ticket/:artifact/pending",
+    "/api/ticket-chat/:project/:ticket/pending",
     async (req: Request, res: Response) => {
       try {
         const projectId = decodeURIComponent(req.params.project);
@@ -156,7 +143,6 @@ export function registerArtifactChatRoutes(
           return;
         }
 
-        // Update activity timestamp
         artifactChatStore.updateActivity(contextId);
 
         const question = readQuestion(projectId, contextId);
@@ -174,15 +160,15 @@ export function registerArtifactChatRoutes(
           endReason: session.endReason,
         });
       } catch (error) {
-        console.error("[artifact-chat/pending] Error:", error);
+        console.error("[ticket-chat/pending] Error:", error);
         res.status(500).json({ error: (error as Error).message });
       }
     }
   );
 
-  // Send user input
+  // Send user input (follow-up)
   app.post(
-    "/api/artifact-chat/:project/:ticket/:artifact/input",
+    "/api/ticket-chat/:project/:ticket/input",
     async (req: Request, res: Response) => {
       try {
         const projectId = decodeURIComponent(req.params.project);
@@ -203,12 +189,8 @@ export function registerArtifactChatRoutes(
         }
 
         // session.active is expected to be false here on every follow-up -
-        // the previous turn's Claude process suspended via chat_ask, got its
-        // answer recorded, and exited (the normal, correct suspend/exit
-        // flow). That is NOT an error state; it just means this specific
-        // follow-up needs a --resume, not a rejection. writeResponse alone
-        // used to be the entire implementation here, which meant the
-        // follow-up got saved and then genuinely nothing ever answered it.
+        // see the identical comment in artifact-chat.routes.ts's /input
+        // route, same mechanism, same reasoning.
         const pendingQuestion = readQuestion(projectId, contextId);
         const claudeSessionId = pendingQuestion?.claudeSessionId;
         if (!claudeSessionId) {
@@ -229,23 +211,13 @@ export function registerArtifactChatRoutes(
           return;
         }
 
-        // Same persistence fix as /start - a follow-up needs saving too.
-        // This route only ever creates artifact-scoped sessions (see
-        // /start above), so artifactFilename is always real here in
-        // practice - the field is optional on the type only because
-        // ticket-chat.routes.ts shares the same session shape.
-        if (session.artifactFilename) {
-          const ticket = await getTicket(projectId, session.ticketId);
-          persistArtifactUserMessage(
-            ticket.conversationId,
-            projectId,
-            session.ticketId,
-            session.artifactFilename,
-            message
-          );
-        }
+        // Same persistence fix as /start - a follow-up needs to be saved
+        // into real history too, not just handed to the agent as --print
+        // text.
+        const ticket = await getTicket(projectId, session.ticketId);
+        persistUserMessage(ticket.conversationId, projectId, session.ticketId, message);
 
-        await resumeArtifactChatSession(
+        await resumeTicketChatSession(
           session,
           claudeSessionId,
           message,
@@ -256,15 +228,15 @@ export function registerArtifactChatRoutes(
 
         res.json({ ok: true });
       } catch (error) {
-        console.error("[artifact-chat/input] Error:", error);
+        console.error("[ticket-chat/input] Error:", error);
         res.status(500).json({ error: (error as Error).message });
       }
     }
   );
 
-  // End session (called when modal closes)
+  // End session (called when modal/panel closes)
   app.post(
-    "/api/artifact-chat/:project/:ticket/:artifact/end",
+    "/api/ticket-chat/:project/:ticket/end",
     async (req: Request, res: Response) => {
       try {
         const projectId = decodeURIComponent(req.params.project);
@@ -277,39 +249,37 @@ export function registerArtifactChatRoutes(
 
         const session = artifactChatStore.getSession(contextId);
         if (session) {
-          // Stop the Claude session if active
           if (session.active) {
             sessionService.stopSession(session.sessionId);
           }
-
-          // Clean up files
           try { clearQuestion(projectId, contextId); } catch {}
           try { clearResponse(projectId, contextId); } catch {}
-
-          // Remove from store
           artifactChatStore.deleteSession(contextId);
         }
 
         res.json({ ok: true });
       } catch (error) {
-        console.error("[artifact-chat/end] Error:", error);
+        console.error("[ticket-chat/end] Error:", error);
         res.status(500).json({ error: (error as Error).message });
       }
     }
   );
 }
 
-// Helper to build the prompt
-function buildArtifactChatPrompt(
+function buildTicketChatPrompt(
   agentPrompt: string,
   projectId: string,
   ticketId: string,
   ticketTitle: string,
   ticketDescription: string,
-  artifactFilename: string,
-  artifactContent: string,
+  ticketPhase: string,
+  artifacts: Array<{ filename: string; description?: string; type: string }>,
   initialMessage: string
 ): string {
+  const artifactList = artifacts.length
+    ? artifacts.map((a) => `- \`${a.filename}\` (${a.type})${a.description ? ` - ${a.description}` : ""}`).join("\n")
+    : "(no artifacts attached yet)";
+
   return `${agentPrompt}
 
 ---
@@ -319,13 +289,14 @@ function buildArtifactChatPrompt(
 **Project:** ${projectId}
 **Ticket:** ${ticketId}
 **Title:** ${ticketTitle}
+**Current phase:** ${ticketPhase}
 ${ticketDescription ? `**Description:** ${ticketDescription}` : ""}
 
-## Artifact: ${artifactFilename}
+## Artifacts attached to this ticket
 
-\`\`\`markdown
-${artifactContent}
-\`\`\`
+${artifactList}
+
+Use \`get_artifact\`/\`list_artifacts\` to read any of the above when the question needs it - don't guess at their contents from the filename/description alone.
 
 ## User's Question
 
@@ -333,10 +304,10 @@ ${initialMessage}
 
 ---
 
-Begin by answering the user's question about this artifact.`;
+Begin by answering the user's question about this ticket.`;
 }
 
-function buildArtifactChatMcpConfig(projectId: string, ticketId: string, contextId: string) {
+function buildTicketChatMcpConfig(projectId: string, ticketId: string, contextId: string) {
   const mcpProxyPath = path.join(__dirname, "..", "..", "mcp", "proxy.js");
   return {
     mcpServers: {
@@ -353,8 +324,7 @@ function buildArtifactChatMcpConfig(projectId: string, ticketId: string, context
   };
 }
 
-// Helper to spawn Claude session for artifact chat
-async function spawnArtifactChatSession(
+async function spawnTicketChatSession(
   session: ArtifactChatSession,
   prompt: string,
   projectPath: string,
@@ -364,23 +334,18 @@ async function spawnArtifactChatSession(
   const meta = {
     projectId,
     ticketId,
-    artifactChat: true,
+    ticketChat: true,
     contextId: session.contextId,
     startedAt: new Date().toISOString(),
     status: "running" as const,
   };
 
-  const mcpConfig = buildArtifactChatMcpConfig(projectId, ticketId, session.contextId);
+  const mcpConfig = buildTicketChatMcpConfig(projectId, ticketId, session.contextId);
   const args = buildAdhocChatArgs(mcpConfig, prompt);
-  runAdhocChatProcess(session, args, projectPath, projectId, ticketId, "artifact-qa", meta);
+  runAdhocChatProcess(session, args, projectPath, projectId, ticketId, "ticket-qa", meta);
 }
 
-// Resume an artifact-chat session for a follow-up message. Mirrors
-// spawnArtifactChatSession but uses --resume <claudeSessionId> --print
-// <message> instead of a fresh --print <prompt>, so the conversation
-// actually continues instead of the follow-up being written to the
-// database with nothing ever reading it back out.
-async function resumeArtifactChatSession(
+async function resumeTicketChatSession(
   session: ArtifactChatSession | undefined,
   claudeSessionId: string,
   message: string,
@@ -393,40 +358,31 @@ async function resumeArtifactChatSession(
   const meta = {
     projectId,
     ticketId,
-    artifactChat: true,
+    ticketChat: true,
     contextId: session.contextId,
     resumedAt: new Date().toISOString(),
     status: "running" as const,
   };
 
-  const mcpConfig = buildArtifactChatMcpConfig(projectId, ticketId, session.contextId);
+  const mcpConfig = buildTicketChatMcpConfig(projectId, ticketId, session.contextId);
   const args = buildAdhocChatArgs(mcpConfig, message, claudeSessionId);
 
   artifactChatStore.updateActivity(session.contextId);
-  runAdhocChatProcess(session, args, projectPath, projectId, ticketId, "artifact-qa", meta);
+  runAdhocChatProcess(session, args, projectPath, projectId, ticketId, "ticket-qa", meta);
 }
 
-// Saves the user's actual typed question into the ticket's real
-// conversation, tagged with which artifact it's about (matching the
-// metadata ChatService.askAsync now attaches to the agent's answer - see
-// getAdhocChatMetadata in chat.service.ts) so the artifact panel can fetch
-// and filter its own history by artifactFilename instead of losing it on
-// every close/reopen. Also emits the same event the general ticket box's
-// /comments route does, so it's visible immediately via the existing
-// useTicketMessage SSE subscription.
-function persistArtifactUserMessage(
+// Saves the user's actual typed message into the ticket's real conversation
+// and emits the same event the general ticket box's /comments route does,
+// so it shows up immediately via the existing useTicketMessage SSE
+// subscription in ActivityTab - not just as text handed to the agent.
+function persistUserMessage(
   conversationId: string | undefined,
   projectId: string,
   ticketId: string,
-  artifactFilename: string,
   message: string
 ): void {
   if (!conversationId) return;
-  const saved = addMessage(conversationId, {
-    type: "user",
-    text: message,
-    metadata: { artifactFilename },
-  });
+  const saved = addMessage(conversationId, { type: "user", text: message });
   eventBus.emit("ticket:message", {
     projectId,
     ticketId,

@@ -29,6 +29,7 @@ import {
 } from "../stores/conversation.store.js";
 import { getDatabase } from "../stores/db.js";
 import { getActiveSessionForTicket } from "../stores/session.store.js";
+import { artifactChatStore } from "../stores/artifact-chat.store.js";
 
 export class ChatService {
   private providers: Map<string, ChatProvider> = new Map();
@@ -122,11 +123,13 @@ export class ChatService {
     // Add question message to conversation store (if we have a conversation)
     let questionMessageId: string | undefined;
     if (conversationId) {
+      const adhocMeta = this.getAdhocChatMetadata(context);
+      const metadata = phase || adhocMeta ? { ...(phase ? { phase } : {}), ...adhocMeta } : undefined;
       const message = addMessage(conversationId, {
         type: "question",
         text: question,
         options,
-        metadata: phase ? { phase } : undefined,
+        metadata,
       });
       questionMessageId = message.id;
     }
@@ -156,12 +159,18 @@ export class ChatService {
       );
     }
 
-    // Emit events for real-time updates
+    // Emit events for real-time updates. adhoc marks this as coming from
+    // an artifact-chat/ticket-chat Q&A session rather than a real
+    // phase-agent question - the frontend's "yellow ? badge" (isPending)
+    // is meant for "the ticket's own workflow is genuinely blocked on
+    // you," which is not true for these; they don't block anything, and
+    // the badge previously only cleared on a type:'user' reply, so simply
+    // reading the answer and moving on left it stuck lit forever.
     if (context.ticketId) {
       eventBus.emit("ticket:message", {
         projectId: context.projectId,
         ticketId: context.ticketId,
-        message: { type: "question", text: question, options, timestamp: now },
+        message: { type: "question", text: question, options, timestamp: now, adhoc: !!this.getAdhocChatMetadata(context) },
       });
     }
     if (context.brainstormId) {
@@ -262,11 +271,13 @@ export class ChatService {
     // Add question message to conversation store
     let questionMessageId: string = '';
     if (conversationId) {
+      const adhocMeta = this.getAdhocChatMetadata(context);
+      const metadata = phase || adhocMeta ? { ...(phase ? { phase } : {}), ...adhocMeta } : undefined;
       const message = addMessage(conversationId, {
         type: "question",
         text: question,
         options,
-        metadata: phase ? { phase } : undefined,
+        metadata,
       });
       questionMessageId = message.id;
     }
@@ -296,12 +307,13 @@ export class ChatService {
       `[ChatService] askAsync - question saved for ${contextId}: ${truncatedQuestion}`,
     );
 
-    // Emit SSE events for frontend
+    // Emit SSE events for frontend - see the identical comment on the
+    // matching emit in ask() above for why `adhoc` exists.
     if (context.ticketId) {
       eventBus.emit("ticket:message", {
         projectId: context.projectId,
         ticketId: context.ticketId,
-        message: { type: "question", text: question, options, timestamp: now },
+        message: { type: "question", text: question, options, timestamp: now, adhoc: !!this.getAdhocChatMetadata(context) },
       });
     }
     if (context.brainstormId) {
@@ -519,18 +531,43 @@ export class ChatService {
     return answer;
   }
 
+  // brainstormId is checked before ticketId deliberately. Every normal
+  // ticket-phase session hardcodes brainstormId to "" (session.service.ts),
+  // so this ordering is a no-op for them either way. The one case where both
+  // are simultaneously non-empty is artifact-chat (artifact-chat.routes.ts
+  // sets POTATO_TICKET_ID *and* POTATO_BRAINSTORM_ID: session.contextId, by
+  // design, per that file's own comment "Use contextId for chat routing") -
+  // ticketId-first silently broke that routing, sending the artifact chat's
+  // answer to the ticket's own pending-question slot instead of its own.
   private getContextKey(context: ChatContext): string {
-    return `${context.projectId}:${context.ticketId || context.brainstormId || context.epicId}`;
+    return `${context.projectId}:${context.brainstormId || context.ticketId || context.epicId}`;
   }
 
   private getContextId(context: ChatContext): string {
-    return context.ticketId || context.brainstormId || context.epicId || "";
+    return context.brainstormId || context.ticketId || context.epicId || "";
   }
 
   private generateConversationId(): string {
     const timestamp = Date.now();
     const random = Math.random().toString(36).substring(2, 8);
     return `conv_${timestamp}_${random}`;
+  }
+
+  // Artifact-chat and ticket-chat sessions both write into the same shared
+  // ticket conversation (getConversationId resolves by ticketId, and both
+  // session types always carry a real one) - so a question asked from
+  // "Ask about this artifact" was indistinguishable from a general
+  // ticket-level question once saved, and the artifact panel (which has no
+  // persistence of its own - see ArtifactChat.tsx) had no way to recover
+  // its own history on reopen. Tagging the message with which artifact (if
+  // any) the session is scoped to lets the panel fetch and filter by it.
+  private getAdhocChatMetadata(context: ChatContext): Record<string, unknown> | undefined {
+    if (!context.brainstormId) return undefined;
+    const session = artifactChatStore.getSession(context.brainstormId);
+    if (!session) return undefined;
+    return session.artifactFilename
+      ? { artifactFilename: session.artifactFilename }
+      : { ticketChat: true };
   }
 
   private getConversationId(context: ChatContext): string | null {

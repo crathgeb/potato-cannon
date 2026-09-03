@@ -563,7 +563,8 @@ function migrateV13(db: Database.Database): void {
 /**
  * V14: Add blocked/blocked_at columns to tickets - an orthogonal flag
  * (bright red outline on the card, toggled from the ticket detail header)
- * separate from the "Blocked" phase, which stays as-is for now.
+ * that replaced the old "Blocked" phase entirely (removed in a later
+ * change - it stranded a ticket out of its real place in the pipeline).
  */
 function migrateV14(db: Database.Database): void {
   const columns = db.pragma("table_info(tickets)") as { name: string }[];

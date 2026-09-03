@@ -26,6 +26,7 @@ import {
   registerTaskRoutes,
   registerRalphRoutes,
   registerArtifactChatRoutes,
+  registerTicketChatRoutes,
   registerFolderRoutes,
   registerEpicRoutes,
   refreshProjects,
@@ -639,6 +640,7 @@ export async function main(): Promise<void> {
   registerTaskRoutes(app);
   registerRalphRoutes(app);
   registerArtifactChatRoutes(app, sessionService, getProjects);
+  registerTicketChatRoutes(app, sessionService, getProjects);
   registerFolderRoutes(app);
   registerEpicRoutes(app, sessionService, () => projects);
 

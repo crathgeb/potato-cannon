@@ -12,5 +12,6 @@ export { registerTemplateRoutes } from "./templates.routes.js";
 export { registerTaskRoutes } from "./tasks.routes.js";
 export { registerRalphRoutes, getPendingVerdict, getVerdictKey } from "./ralph.routes.js";
 export { registerArtifactChatRoutes } from './artifact-chat.routes.js';
+export { registerTicketChatRoutes } from './ticket-chat.routes.js';
 export { registerFolderRoutes } from "./folders.routes.js";
 export { registerEpicRoutes } from "./epics.routes.js";

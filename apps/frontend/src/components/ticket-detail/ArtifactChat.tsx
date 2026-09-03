@@ -33,12 +33,47 @@ export function ArtifactChat({
   const [sessionActive, setSessionActive] = useState(false)
   const [endReason, setEndReason] = useState<string | null>(null)
   const [pendingOptions, setPendingOptions] = useState<string[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastConversationIdRef = useRef<string | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
+
+  // Fetch this artifact's prior Q&A history on mount, filtered out of the
+  // shared ticket conversation by the artifactFilename tag ChatService
+  // attaches (see getAdhocChatMetadata in chat.service.ts). Without this,
+  // every previous exchange with this exact panel was lost the moment it
+  // closed - the panel kept messages only in local state, nothing was ever
+  // fetched back. Does not resume any live session automatically - a new
+  // question here still starts a fresh one - just restores what to look at.
+  useEffect(() => {
+    let active = true
+    setIsLoadingHistory(true)
+    api.getTicketMessages(projectId, ticketId)
+      .then((response) => {
+        if (!active) return
+        const history = response.messages
+          .filter((m) => m.metadata?.artifactFilename === artifactFilename)
+          .map((m): ArtifactChatMessage => ({
+            type: m.type === 'notification' || m.type === 'artifact' ? 'system' : m.type,
+            text: m.text,
+            conversationId: m.conversationId,
+            options: m.options,
+            timestamp: m.timestamp
+          }))
+        setMessages(history)
+      })
+      .catch(() => {
+        // Non-fatal - panel still works for a fresh question, just without
+        // prior history restored.
+      })
+      .finally(() => {
+        if (active) setIsLoadingHistory(false)
+      })
+    return () => { active = false }
+  }, [projectId, ticketId, artifactFilename])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -114,8 +149,9 @@ export function ArtifactChat({
   const startSession = useCallback(async (message: string) => {
     setIsStarting(true)
 
-    // Add user message immediately
-    setMessages([{
+    // Add user message immediately - appended, not replacing, so restored
+    // history from the fetch-on-mount above stays visible.
+    setMessages(prev => [...prev, {
       type: 'user',
       text: message,
       timestamp: new Date().toISOString()
@@ -258,7 +294,14 @@ export function ArtifactChat({
       {/* Messages area */}
       <ScrollArea ref={scrollAreaRef} className="flex-1 min-h-0 px-4">
         <div className="space-y-4 py-4">
-          {messages.length === 0 && !isStarting && (
+          {isLoadingHistory && (
+            <div className="text-center py-8 text-text-muted text-sm flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading conversation...
+            </div>
+          )}
+
+          {!isLoadingHistory && messages.length === 0 && !isStarting && (
             <div className="text-center py-8 text-text-muted text-sm">
               Ask a question about this artifact to start a conversation
             </div>

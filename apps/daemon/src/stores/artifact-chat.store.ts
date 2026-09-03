@@ -5,7 +5,9 @@ export interface ArtifactChatSession {
   contextId: string;
   projectId: string;
   ticketId: string;
-  artifactFilename: string;
+  // Absent means this is a ticket-wide Q&A session (see
+  // registerTicketChatRoutes), not scoped to one artifact.
+  artifactFilename?: string;
   active: boolean;
   endReason?: "completed" | "error" | "timeout";
   createdAt: string;
@@ -22,10 +24,12 @@ class ArtifactChatStore {
   createSession(
     projectId: string,
     ticketId: string,
-    artifactFilename: string
+    artifactFilename?: string
   ): ArtifactChatSession {
     const sessionId = `artsess_${crypto.randomBytes(8).toString("hex")}`;
-    const contextId = `artchat_${crypto.randomBytes(8).toString("hex")}`;
+    // Prefix distinguishes ticket-wide sessions in logs/DB rows at a glance;
+    // both flow through the exact same context_id-based routing/resume path.
+    const contextId = `${artifactFilename ? "artchat" : "ticketchat"}_${crypto.randomBytes(8).toString("hex")}`;
     const now = new Date().toISOString();
 
     const session: ArtifactChatSession = {
@@ -79,6 +83,23 @@ class ArtifactChatStore {
         session.projectId === projectId &&
         session.ticketId === ticketId &&
         session.artifactFilename === artifactFilename &&
+        session.active
+      ) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+
+  getActiveSessionForTicket(
+    projectId: string,
+    ticketId: string
+  ): ArtifactChatSession | undefined {
+    for (const session of this.sessions.values()) {
+      if (
+        session.projectId === projectId &&
+        session.ticketId === ticketId &&
+        !session.artifactFilename &&
         session.active
       ) {
         return session;

@@ -29,6 +29,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { timeAgo } from '@/lib/utils'
 import { DetailsTab } from './DetailsTab'
@@ -85,8 +86,20 @@ export function TicketDetailPanel() {
     targetPhase: string
   } | null>(null)
 
+  // Inline title edit (same pattern as EpicDetailPanel)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState('')
+
   // Tab state - resets to phase-based default when ticket changes
   const [activeTab, setActiveTab] = useState<string>('details')
+
+  // Sync title draft when ticket data changes
+  useEffect(() => {
+    if (ticket) {
+      setTitleValue(ticket.title)
+      setEditingTitle(false)
+    }
+  }, [ticket?.id, ticket?.title])
 
   // Reset tab to phase-based default when ticket changes
   useEffect(() => {
@@ -128,12 +141,8 @@ export function TicketDetailPanel() {
     [currentProjectId, ticketSheetTicketId, ticket?.phase, templateConfig, updateTicket]
   )
 
-  // Promote/Demote step through the real phase sequence, skipping "Blocked"
-  // - that's a separate off-ramp column, not a normal step in the pipeline.
-  const promotableSequence = useMemo(
-    () => (phases ?? []).filter((p) => p !== 'Blocked'),
-    [phases]
-  )
+  // Promote/Demote step through the real phase sequence.
+  const promotableSequence = phases ?? []
   const currentPhaseIndex = ticket ? promotableSequence.indexOf(ticket.phase) : -1
   const demoteTarget = currentPhaseIndex > 0 ? promotableSequence[currentPhaseIndex - 1] : null
   const promoteTarget =
@@ -149,6 +158,22 @@ export function TicketDetailPanel() {
       updates: { blocked: !ticket.blocked }
     })
   }, [currentProjectId, ticketSheetTicketId, ticket, updateTicket])
+
+  const handleSaveTitle = useCallback(() => {
+    if (!currentProjectId || !ticketSheetTicketId || !ticket) return
+    const trimmed = titleValue.trim()
+    if (!trimmed || trimmed === ticket.title) {
+      setTitleValue(ticket.title)
+      setEditingTitle(false)
+      return
+    }
+    updateTicket.mutate({
+      projectId: currentProjectId,
+      ticketId: ticketSheetTicketId,
+      updates: { title: trimmed }
+    })
+    setEditingTitle(false)
+  }, [currentProjectId, ticketSheetTicketId, ticket, titleValue, updateTicket])
 
   const handleConfirmMove = useCallback(() => {
     if (!confirmDialog || !currentProjectId || !ticketSheetTicketId) return
@@ -277,9 +302,31 @@ export function TicketDetailPanel() {
                       </Button>
                     </div>
                   </div>
-                  <h2 className="text-text-primary text-lg font-semibold">
-                    {ticket.title}
-                  </h2>
+                  {editingTitle ? (
+                    <Input
+                      value={titleValue}
+                      onChange={(e) => setTitleValue(e.target.value)}
+                      onBlur={handleSaveTitle}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveTitle()
+                        if (e.key === 'Escape') {
+                          setTitleValue(ticket.title)
+                          setEditingTitle(false)
+                        }
+                      }}
+                      autoFocus
+                      disabled={updateTicket.isPending}
+                      className="text-lg font-semibold"
+                    />
+                  ) : (
+                    <h2
+                      className="text-text-primary text-lg font-semibold cursor-pointer hover:text-accent transition-colors"
+                      onClick={() => setEditingTitle(true)}
+                      title="Click to edit title"
+                    >
+                      {ticket.title}
+                    </h2>
+                  )}
 
                   {/* Phase breadcrumb */}
                   {phaseBreadcrumb && phaseBreadcrumb.length > 1 && (

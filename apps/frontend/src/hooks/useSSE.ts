@@ -221,14 +221,22 @@ export function useSSE() {
           const data = JSON.parse(e.data) as SSEEventData
           window.dispatchEvent(new CustomEvent('sse:ticket-message', { detail: data }))
 
-          // Update pending tickets based on message type
+          // Update pending tickets based on message type. adhoc means this
+          // came from an artifact-chat/ticket-chat Q&A session, not a real
+          // phase-agent question - those don't block the ticket's workflow,
+          // so they shouldn't light the "waiting on you" badge. Skipping
+          // addPendingTicket for them (rather than just relying on the
+          // 'user' branch to clear it later) is the actual fix: previously
+          // it lit on every such answer and only cleared if you happened
+          // to send a follow-up - reading the answer and moving on left it
+          // stuck lit with nothing pending.
           const { projectId, ticketId, message } = data as {
             projectId?: string
             ticketId?: string
-            message?: { type?: string }
+            message?: { type?: string; adhoc?: boolean }
           }
           if (projectId && ticketId && message) {
-            if (message.type === 'question') {
+            if (message.type === 'question' && !message.adhoc) {
               addPendingTicket(projectId, ticketId)
             } else if (message.type === 'user') {
               removePendingTicket(projectId, ticketId)

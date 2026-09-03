@@ -5,7 +5,7 @@ import { eventBus } from "../../utils/event-bus.js";
 import { getPhaseConfig } from "./phase-config.js";
 import type { SessionService } from "./index.js";
 
-const EXCLUDED_PHASES = ["Ideas", "Blocked", "Done"];
+const EXCLUDED_PHASES = ["Ideas", "Done"];
 
 /** Tracks phases currently being drained to prevent re-entrant cascades. */
 const drainingPhases = new Set<string>();

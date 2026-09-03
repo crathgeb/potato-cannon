@@ -31,7 +31,7 @@ import {
   getActiveSessionForBrainstorm,
   getActiveSessionForTicket,
 } from "../../stores/session.store.js";
-import { getMessages } from "../../stores/conversation.store.js";
+import { getMessages, addMessage } from "../../stores/conversation.store.js";
 import {
   readResponse,
   readQuestion,
@@ -1517,7 +1517,11 @@ export class SessionService {
   }
 
   /**
-   * Handle ticket blocked - move to Blocked phase
+   * Handle ticket blocked - set the blocked flag in place, rather than
+   * moving the ticket to a separate "Blocked" phase. Losing a ticket's real
+   * position in the pipeline is exactly the wrong move for this: these are
+   * automatic failures (agent crash, ralph loop exhausted, task failed) -
+   * knowing *where* it failed is the most useful thing the board can show.
    */
   private async handleTicketBlocked(
     projectId: string,
@@ -1526,21 +1530,20 @@ export class SessionService {
   ): Promise<void> {
     console.log(`[handleTicketBlocked] Blocking ticket ${ticketId}: ${reason}`);
 
-    // Get current phase before updating
     const currentTicket = getTicket(projectId, ticketId);
-    const previousPhase = currentTicket.phase;
 
-    const ticket = await updateTicket(projectId, ticketId, { phase: "Blocked", reason });
+    const ticket = await updateTicket(projectId, ticketId, { blocked: true });
     await logToDaemon(projectId, ticketId, `Ticket blocked: ${reason}`);
+
+    if (currentTicket.conversationId) {
+      addMessage(currentTicket.conversationId, {
+        type: "notification",
+        text: `Ticket blocked automatically: ${reason}`,
+      });
+    }
 
     // Emit SSE events so frontend updates
     eventBus.emit("ticket:updated", { projectId, ticket });
-    eventBus.emit("ticket:moved", {
-      projectId,
-      ticketId,
-      from: previousPhase,
-      to: "Blocked",
-    });
   }
 
   async stopAll(timeout: number = 4000): Promise<void> {

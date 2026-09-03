@@ -42,7 +42,14 @@ export function createWaitController(contextId: string): AbortController {
 
 function deriveContextType(contextId: string): "ticket" | "brainstorm" | "artifact_chat" {
   if (contextId.startsWith("brain_")) return "brainstorm";
-  if (contextId.startsWith("artchat_")) return "artifact_chat";
+  // ticketchat_ (whole-ticket Q&A, see ticket-chat.routes.ts) is grouped
+  // under the same type as artchat_ - both are ad-hoc Q&A sessions that
+  // must NOT count as a real, ticket-workflow-blocking pending question
+  // (see getPendingQuestionsByProject's WHERE context_type = 'ticket'
+  // filter). Before this, a ticket-chat session's context_id (a
+  // "ticketchat_..." string, not a real ticket ID) leaked into the
+  // pendingTicketIds heartbeat as if it were one.
+  if (contextId.startsWith("artchat_") || contextId.startsWith("ticketchat_")) return "artifact_chat";
   return "ticket";
 }
 
