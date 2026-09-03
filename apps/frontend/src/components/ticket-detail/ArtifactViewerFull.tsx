@@ -86,13 +86,19 @@ export function ArtifactViewerFull({
     if (!artifact) return
 
     try {
-      await updateArtifact.mutateAsync({
+      const result = await updateArtifact.mutateAsync({
         filename: artifact.filename,
         content: editContent,
       })
       setContent(editContent)
       setIsEditing(false)
-      toast.success('Artifact saved')
+      if (result.wroteThrough === false) {
+        toast.warning('Saved to Cannon, but failed to write through to the real file', {
+          description: 'An agent reading the actual file on disk will not see this edit.',
+        })
+      } else {
+        toast.success('Artifact saved')
+      }
     } catch (err) {
       toast.error('Failed to save artifact')
     }

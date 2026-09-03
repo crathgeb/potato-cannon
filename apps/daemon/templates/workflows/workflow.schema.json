@@ -118,6 +118,11 @@
             }
           ],
           "description": "Optional model to use for this agent. If not specified, uses Claude Code's default."
+        },
+        "resumePrevious": {
+          "type": "boolean",
+          "description": "If true, resumes the ticket's most recent Claude session (via --resume) instead of spawning a fresh one with a rebuilt context dump. Lets a chain of phases behave as one continuous conversation.",
+          "default": false
         }
       },
       "additionalProperties": false

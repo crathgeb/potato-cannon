@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { Loader2, X } from 'lucide-react'
+import { Loader2, X, ArrowLeft, ArrowRight, Ban } from 'lucide-react'
 import { useAppStore } from '@/stores/appStore'
 import {
   useTicket,
@@ -29,6 +29,7 @@ import {
   DialogTitle
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { timeAgo } from '@/lib/utils'
 import { DetailsTab } from './DetailsTab'
@@ -85,8 +86,20 @@ export function TicketDetailPanel() {
     targetPhase: string
   } | null>(null)
 
+  // Inline title edit (same pattern as EpicDetailPanel)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState('')
+
   // Tab state - resets to phase-based default when ticket changes
   const [activeTab, setActiveTab] = useState<string>('details')
+
+  // Sync title draft when ticket data changes
+  useEffect(() => {
+    if (ticket) {
+      setTitleValue(ticket.title)
+      setEditingTitle(false)
+    }
+  }, [ticket?.id, ticket?.title])
 
   // Reset tab to phase-based default when ticket changes
   useEffect(() => {
@@ -127,6 +140,40 @@ export function TicketDetailPanel() {
     },
     [currentProjectId, ticketSheetTicketId, ticket?.phase, templateConfig, updateTicket]
   )
+
+  // Promote/Demote step through the real phase sequence.
+  const promotableSequence = phases ?? []
+  const currentPhaseIndex = ticket ? promotableSequence.indexOf(ticket.phase) : -1
+  const demoteTarget = currentPhaseIndex > 0 ? promotableSequence[currentPhaseIndex - 1] : null
+  const promoteTarget =
+    currentPhaseIndex >= 0 && currentPhaseIndex < promotableSequence.length - 1
+      ? promotableSequence[currentPhaseIndex + 1]
+      : null
+
+  const handleToggleBlock = useCallback(() => {
+    if (!currentProjectId || !ticketSheetTicketId || !ticket) return
+    updateTicket.mutate({
+      projectId: currentProjectId,
+      ticketId: ticketSheetTicketId,
+      updates: { blocked: !ticket.blocked }
+    })
+  }, [currentProjectId, ticketSheetTicketId, ticket, updateTicket])
+
+  const handleSaveTitle = useCallback(() => {
+    if (!currentProjectId || !ticketSheetTicketId || !ticket) return
+    const trimmed = titleValue.trim()
+    if (!trimmed || trimmed === ticket.title) {
+      setTitleValue(ticket.title)
+      setEditingTitle(false)
+      return
+    }
+    updateTicket.mutate({
+      projectId: currentProjectId,
+      ticketId: ticketSheetTicketId,
+      updates: { title: trimmed }
+    })
+    setEditingTitle(false)
+  }, [currentProjectId, ticketSheetTicketId, ticket, titleValue, updateTicket])
 
   const handleConfirmMove = useCallback(() => {
     if (!confirmDialog || !currentProjectId || !ticketSheetTicketId) return
@@ -213,10 +260,73 @@ export function TicketDetailPanel() {
                         </button>
                       ) : null
                     })()}
+
+                    {/* Demote / Block / Promote - small, sits between the ID pill and the close button */}
+                    <div className="flex items-end gap-1 mx-auto self-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-4 rounded-full px-1.5 py-0 text-[8px] leading-none border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-40"
+                        disabled={!demoteTarget || updateTicket.isPending}
+                        onClick={() => demoteTarget && handlePhaseChange(demoteTarget)}
+                        title={demoteTarget ? `Send back to ${demoteTarget}` : 'Already at the first phase'}
+                      >
+                        <ArrowLeft className="h-2 w-2 mr-0.5" />
+                        Demote
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={
+                          ticket.blocked
+                            ? 'h-4 rounded-full px-1.5 py-0 text-[8px] leading-none border-red-500 bg-red-500 text-white hover:bg-red-600 hover:border-red-600'
+                            : 'h-4 rounded-full px-1.5 py-0 text-[8px] leading-none border-border text-text-muted hover:text-text-primary'
+                        }
+                        disabled={updateTicket.isPending}
+                        onClick={handleToggleBlock}
+                        title={ticket.blocked ? 'Unblock this ticket' : 'Block this ticket'}
+                      >
+                        <Ban className="h-2 w-2 mr-0.5" />
+                        {ticket.blocked ? 'Blocked' : 'Block'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-4 rounded-full px-1.5 py-0 text-[8px] leading-none border-green-500/30 bg-green-500/10 text-green-400 hover:bg-green-500/20 hover:text-green-300 disabled:opacity-40"
+                        disabled={!promoteTarget || updateTicket.isPending}
+                        onClick={() => promoteTarget && handlePhaseChange(promoteTarget)}
+                        title={promoteTarget ? `Advance to ${promoteTarget}` : 'Already at the last phase'}
+                      >
+                        Promote
+                        <ArrowRight className="h-2 w-2 ml-0.5" />
+                      </Button>
+                    </div>
                   </div>
-                  <h2 className="text-text-primary text-lg font-semibold">
-                    {ticket.title}
-                  </h2>
+                  {editingTitle ? (
+                    <Input
+                      value={titleValue}
+                      onChange={(e) => setTitleValue(e.target.value)}
+                      onBlur={handleSaveTitle}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveTitle()
+                        if (e.key === 'Escape') {
+                          setTitleValue(ticket.title)
+                          setEditingTitle(false)
+                        }
+                      }}
+                      autoFocus
+                      disabled={updateTicket.isPending}
+                      className="text-lg font-semibold"
+                    />
+                  ) : (
+                    <h2
+                      className="text-text-primary text-lg font-semibold cursor-pointer hover:text-accent transition-colors"
+                      onClick={() => setEditingTitle(true)}
+                      title="Click to edit title"
+                    >
+                      {ticket.title}
+                    </h2>
+                  )}
 
                   {/* Phase breadcrumb */}
                   {phaseBreadcrumb && phaseBreadcrumb.length > 1 && (

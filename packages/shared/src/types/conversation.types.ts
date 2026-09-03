@@ -31,6 +31,14 @@ export interface TicketMessage {
     filename: string
     description?: string
   }
+  // Tags set by ChatService.getAdhocChatMetadata (artifact-chat / ticket-chat
+  // sessions) so a specific artifact's Q&A panel can fetch and filter its
+  // own history out of the shared ticket conversation on mount.
+  metadata?: {
+    artifactFilename?: string
+    ticketChat?: boolean
+    [key: string]: unknown
+  }
 }
 
 export interface TicketMessagesResponse {

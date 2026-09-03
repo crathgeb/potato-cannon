@@ -244,6 +244,25 @@ async function addTicketComment(
 
   await fs.writeFile(commentsFile, JSON.stringify(comments, null, 2));
 
+  // Also post to the ticket's conversation (POST /comments, added alongside
+  // this tool) so agent comments show up in the dashboard's activity feed.
+  // Previously this file write was the only record - nothing in the
+  // frontend ever read comments.json, so every agent comment was invisible.
+  // Kept as a separate call (not a refactor of the file write above) to
+  // keep this patch minimal; comments.json stays as the on-disk record.
+  try {
+    await fetch(
+      `${ctx.daemonUrl}/api/tickets/${encodeURIComponent(ctx.projectId)}/${ctx.ticketId}/comments`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment, type: "notification" }),
+      },
+    );
+  } catch {
+    // Best-effort - the file write above is still the source of truth.
+  }
+
   return { success: true };
 }
 

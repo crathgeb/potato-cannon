@@ -197,7 +197,7 @@ export const api = {
   },
 
   updateTicketArtifact: (projectId: string, ticketId: string, filename: string, content: string) =>
-    request<{ ok: true; filename: string; isNewVersion: boolean }>(
+    request<{ ok: true; filename: string; isNewVersion: boolean; wroteThrough: boolean | null }>(
       `/api/tickets/${encodeURIComponent(projectId)}/${ticketId}/artifacts/${encodeURIComponent(filename)}`,
       {
         method: 'PUT',
@@ -220,6 +220,16 @@ export const api = {
     request<void>(`/api/tickets/${encodeURIComponent(projectId)}/${ticketId}/input`, {
       method: 'POST',
       body: JSON.stringify({ message })
+    }),
+
+  // Post a comment on a ticket regardless of whether an agent is active -
+  // unlike sendTicketInput, this never touches session/pending-question
+  // state. Use this during manual review phases, where no agent is running
+  // and sendTicketInput has nothing to resume.
+  addTicketComment: (projectId: string, ticketId: string, comment: string) =>
+    request<void>(`/api/tickets/${encodeURIComponent(projectId)}/${ticketId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ comment })
     }),
 
   getTicketTasks: (projectId: string, ticketId: string, phase?: string) =>
@@ -385,6 +395,40 @@ export const api = {
   endArtifactChat: (projectId: string, ticketId: string, artifact: string, contextId: string) =>
     request<{ ok: true }>(
       `/api/artifact-chat/${encodeURIComponent(projectId)}/${ticketId}/${encodeURIComponent(artifact)}/end`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ contextId })
+      }
+    ),
+
+  // ============ Ticket Chat (whole-ticket Q&A, sibling of Artifact Chat) ============
+
+  startTicketChat: (projectId: string, ticketId: string, message: string) =>
+    request<ArtifactChatStartResponse>(
+      `/api/ticket-chat/${encodeURIComponent(projectId)}/${ticketId}/start`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ message })
+      }
+    ),
+
+  getTicketChatPending: (projectId: string, ticketId: string, contextId: string) =>
+    request<ArtifactChatPendingResponse>(
+      `/api/ticket-chat/${encodeURIComponent(projectId)}/${ticketId}/pending?contextId=${encodeURIComponent(contextId)}`
+    ),
+
+  sendTicketChatInput: (projectId: string, ticketId: string, contextId: string, message: string) =>
+    request<{ ok: true }>(
+      `/api/ticket-chat/${encodeURIComponent(projectId)}/${ticketId}/input`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ contextId, message })
+      }
+    ),
+
+  endTicketChat: (projectId: string, ticketId: string, contextId: string) =>
+    request<{ ok: true }>(
+      `/api/ticket-chat/${encodeURIComponent(projectId)}/${ticketId}/end`,
       {
         method: 'POST',
         body: JSON.stringify({ contextId })

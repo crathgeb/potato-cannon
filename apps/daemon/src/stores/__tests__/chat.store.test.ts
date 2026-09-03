@@ -509,7 +509,16 @@ describe("getPendingQuestionsByProject", () => {
     assert.ok(!tickets.includes(brainstormId));
   });
 
-  it("should include tickets that have answers (question still exists)", () => {
+  it("should exclude tickets that have answers, even though the row still exists", () => {
+    // This function only feeds the 5s processing:sync heartbeat that drives
+    // the "?" / "needs your input" badge - it's not what triggers resuming
+    // a suspended session (writeResponse's own caller does that directly,
+    // synchronously). Once a human has answered, showing them "still
+    // waiting on you" during the brief window before the row is cleared by
+    // resumeSuspendedTicket is the wrong UX, not a bug to preserve. This
+    // test previously asserted the opposite ("row still exists, so it
+    // should be included") - that was a stale assumption from earlier work,
+    // not something any real caller actually depends on.
     writeQuestion(PROJECT, ticketId1, {
       conversationId: "conv-1",
       question: "Answered ticket",
@@ -520,8 +529,7 @@ describe("getPendingQuestionsByProject", () => {
 
     const result = getPendingQuestionsByProject();
     const tickets = result.get(PROJECT) ?? [];
-    // Row still exists, so it should be included
-    assert.ok(tickets.includes(ticketId1));
+    assert.ok(!tickets.includes(ticketId1));
   });
 });
 

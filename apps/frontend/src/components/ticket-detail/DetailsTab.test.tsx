@@ -44,11 +44,11 @@ describe('DetailsTab - Block Reason in History', () => {
     cleanup()
   })
 
-  it('should display block reason for Blocked history entries', () => {
+  it('should display reason for a history entry that has one', () => {
     const history = [
       { phase: 'Ideas', at: '2026-01-01T00:00:00.000Z' },
       { phase: 'Build', at: '2026-01-02T00:00:00.000Z' },
-      { phase: 'Blocked', at: '2026-01-03T00:00:00.000Z', reason: 'Ralph loop exhausted max attempts (3)' },
+      { phase: 'Review', at: '2026-01-03T00:00:00.000Z', reason: 'Ralph loop exhausted max attempts (3)' },
     ]
 
     render(

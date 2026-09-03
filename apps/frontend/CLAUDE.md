@@ -116,3 +116,14 @@ The dev server proxies `/api/*` and `/events/*` to the Potato Cannon daemon runn
 
 - REST API: `/api/*`
 - Server-Sent Events: `/events/*`
+
+## Known test failures (as of 2026-08-04)
+
+`pnpm test` currently has 32 pre-existing failures across 4 files, unrelated to any Blocked/Brainstorm-status removal work - noting this so nobody burns time assuming they caused it:
+
+- `src/components/board/BrainstormCard.test.tsx` (8 failures) - `TypeError: Cannot read properties of undefined (reading 'getItem')` in `BrainstormCard.tsx`'s `useState` initializer. `localStorage` isn't available in the test environment.
+- `src/hooks/usePendingQuestions.test.ts` (7 failures) - same `localStorage` root cause.
+- `src/stores/appStore.test.ts` (14 failures, `pendingTickets`/`ticketActivity` suites) - not yet root-caused; likely related to the same in-progress ticket-chat/pending-question work these stores support.
+- `src/components/ticket-detail/ActivityTab.test.tsx` (2 failures) - assertions expect placeholder text ("No agent is running...") that doesn't match the component's current implementation.
+
+All four sit inside the still-in-progress ticket-wide Q&A feature (`ticket-chat.routes.ts`, `adhoc-chat-runner.ts`, and related `ActivityTab`/`appStore` changes) - whoever picks that work back up will want to fix these as part of finishing it, most likely by adding a `localStorage` polyfill/mock to the test setup first.

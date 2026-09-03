@@ -89,9 +89,6 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
   }
 
   const imageCount = ticket.images?.length ?? 0
-  const blockReason = ticket.phase === 'Blocked'
-    ? [...(ticket.history ?? [])].reverse().find(h => h.phase === 'Blocked')?.reason
-    : undefined
 
   return (
     <ListItemCard
@@ -111,7 +108,8 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
           'relative group',
           isProcessing && 'ticket-card-processing',
           isProcessing && isSelected && 'ticket-card-selected',
-          isArchiving && 'opacity-50 pointer-events-none cursor-not-allowed'
+          isArchiving && 'opacity-50 pointer-events-none cursor-not-allowed',
+          ticket.blocked && 'border-2 border-red-500 ring-1 ring-red-500/50'
         )}
       >
       {/* Archive button - only for Done phase */}
@@ -167,12 +165,6 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
         {ticket.title}
       </div>
 
-      {/* Block reason subtitle */}
-      {blockReason && (
-        <p className="text-xs text-amber-400 line-clamp-2 mb-2 -mt-1">
-          {blockReason}
-        </p>
-      )}
 
       {/* Meta row */}
       <div className="flex items-center justify-between text-xs text-text-muted">

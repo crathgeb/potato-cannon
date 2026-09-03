@@ -18,6 +18,7 @@ export interface ProvidersConfig {
 
 export interface DaemonConfig {
   port: number;
+  host?: string;
 }
 
 export interface GlobalConfig {

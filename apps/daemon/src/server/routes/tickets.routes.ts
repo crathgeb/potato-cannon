@@ -23,7 +23,7 @@ import {
 import { DEFAULT_PHASES } from "../../types/index.js";
 import { readQuestion, writeResponse, clearQuestion } from "../../stores/chat.store.js";
 import { getActiveSessionForTicket } from "../../stores/session.store.js";
-import { getMessages } from "../../stores/conversation.store.js";
+import { getMessages, addMessage } from "../../stores/conversation.store.js";
 import { updateBrainstorm } from "../../stores/brainstorm.store.js";
 import type { SessionService } from "../../services/session/index.js";
 import type { Project } from "../../types/config.types.js";
@@ -142,7 +142,14 @@ export function registerTicketRoutes(
     try {
       const projectId = decodeURIComponent(req.params.project);
       const ticketId = req.params.id;
-      const { force, ...ticketUpdates } = req.body as { phase?: TicketPhase; sessionId?: string; force?: boolean };
+      const { force, ...ticketUpdates } = req.body as {
+        phase?: TicketPhase;
+        sessionId?: string;
+        force?: boolean;
+        blocked?: boolean;
+        title?: string;
+        description?: string;
+      };
 
       const oldTicket = await getTicket(projectId, ticketId);
       const oldPhase = oldTicket.phase;
@@ -420,6 +427,23 @@ export function registerTicketRoutes(
 
         const result = await saveArtifact(projectId, ticketId, filename, content);
 
+        // Record the edit in the ticket's own conversation - not just the
+        // manifest - so it shows up in the Activity tab and so a later
+        // resumed session's "recent activity since last turn" digest
+        // actually mentions it, instead of the file just silently changing
+        // underneath whatever runs next.
+        const ticket = await getTicket(projectId, ticketId);
+        if (ticket?.conversationId) {
+          const note =
+            result.wroteThrough === false
+              ? `Artifact "${filename}" was manually edited via the Cannon viewer, but the write-through to the real worktree file failed - the change may only be visible here.`
+              : `Artifact "${filename}" was manually edited via the Cannon viewer.`;
+          addMessage(ticket.conversationId, {
+            type: "notification",
+            text: note,
+          });
+        }
+
         // Notify listeners so the frontend can update artifact list
         eventBus.emit("ticket:updated", { projectId, ticketId });
 
@@ -427,6 +451,7 @@ export function registerTicketRoutes(
           ok: true,
           filename: result.filename,
           isNewVersion: result.isNewVersion,
+          wroteThrough: result.wroteThrough,
         });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });
@@ -570,6 +595,57 @@ export function registerTicketRoutes(
         // When the answerBot session ends, it triggers resumeSuspendedTicket automatically.
         // We don't attempt resume here because the answerBot session is still active.
         res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+      }
+    },
+  );
+
+  // Post a human comment on a ticket, independent of whether any agent is
+  // active. Unlike /input, this never touches session/pending-question
+  // state - it exists specifically for phases with no running agent (manual
+  // review gates), where /input is unusable because there's nothing to
+  // resume. Appended to the same conversation the dashboard already reads
+  // via GET .../messages, so it shows up in the normal activity feed
+  // instead of a second, invisible channel.
+  app.post(
+    "/api/tickets/:project/:id/comments",
+    async (req: Request, res: Response) => {
+      try {
+        const projectId = decodeURIComponent(req.params.project);
+        const ticketId = req.params.id;
+        const { comment, type } = req.body as { comment?: string; type?: string };
+
+        if (!comment || !comment.trim()) {
+          res.status(400).json({ error: "Missing comment" });
+          return;
+        }
+
+        // Defaults to "user" (the dashboard's own comment box - a human
+        // speaking). Callers that are NOT the human user (the
+        // add_ticket_comment MCP tool, used by agents) must pass
+        // type: "notification" explicitly, so agent commentary doesn't
+        // render in the same right-aligned bubble as something Rik typed.
+        const messageType = type === "notification" ? "notification" : "user";
+
+        const ticket = await getTicket(projectId, ticketId);
+        if (!ticket.conversationId) {
+          res.status(400).json({ error: "Ticket has no conversation" });
+          return;
+        }
+
+        const message = addMessage(ticket.conversationId, {
+          type: messageType,
+          text: comment.trim(),
+        });
+
+        eventBus.emit("ticket:message", {
+          projectId,
+          ticketId,
+          message: { type: messageType, text: message.text, timestamp: message.timestamp },
+        });
+
+        res.json({ success: true, message });
       } catch (error) {
         res.status(500).json({ error: (error as Error).message });
       }
