@@ -89,9 +89,6 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
   }
 
   const imageCount = ticket.images?.length ?? 0
-  const blockReason = ticket.phase === 'Blocked'
-    ? [...(ticket.history ?? [])].reverse().find(h => h.phase === 'Blocked')?.reason
-    : undefined
 
   return (
     <ListItemCard
@@ -168,12 +165,6 @@ export function TicketCard({ ticket, projectId, swimlaneColor }: TicketCardProps
         {ticket.title}
       </div>
 
-      {/* Block reason subtitle */}
-      {blockReason && (
-        <p className="text-xs text-amber-400 line-clamp-2 mb-2 -mt-1">
-          {blockReason}
-        </p>
-      )}
 
       {/* Meta row */}
       <div className="flex items-center justify-between text-xs text-text-muted">

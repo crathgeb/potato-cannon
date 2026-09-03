@@ -31,7 +31,7 @@ export function SwimlaneBackside({
     model?: string
   } | null>(null)
 
-  const supportsWip = !['Ideas', 'Blocked', 'Done'].includes(phase)
+  const supportsWip = !['Ideas', 'Done'].includes(phase)
   const hasAnswerBot = useHasAnswerBot(projectId, phase)
 
   // Local state for WIP input to avoid reset on every keystroke

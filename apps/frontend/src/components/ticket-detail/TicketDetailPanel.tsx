@@ -128,12 +128,8 @@ export function TicketDetailPanel() {
     [currentProjectId, ticketSheetTicketId, ticket?.phase, templateConfig, updateTicket]
   )
 
-  // Promote/Demote step through the real phase sequence, skipping "Blocked"
-  // - that's a separate off-ramp column, not a normal step in the pipeline.
-  const promotableSequence = useMemo(
-    () => (phases ?? []).filter((p) => p !== 'Blocked'),
-    [phases]
-  )
+  // Promote/Demote step through the real phase sequence.
+  const promotableSequence = useMemo(() => phases ?? [], [phases])
   const currentPhaseIndex = ticket ? promotableSequence.indexOf(ticket.phase) : -1
   const demoteTarget = currentPhaseIndex > 0 ? promotableSequence[currentPhaseIndex - 1] : null
   const promoteTarget =
