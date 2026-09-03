@@ -361,21 +361,16 @@ export async function getWorkflowWithFullPhases(
   const template = await getWorkflow(name);
   if (!template) return null;
 
-  // Inject Ideas at start, Blocked and Done at end
+  // Inject Ideas at start, Done at end. "Blocked" is no longer a phase -
+  // superseded by the per-ticket `blocked` flag (bright red outline,
+  // toggled in place), which doesn't strand a ticket out of its real
+  // position in the pipeline the way moving it to a separate column did.
   const ideasPhase: Phase = {
     id: "Ideas",
     name: "Ideas",
     description: "Tickets start here",
     workers: [],
-    transitions: { next: template.phases[0]?.id || "Blocked", manual: true },
-  };
-
-  const blockedPhase: Phase = {
-    id: "Blocked",
-    name: "Blocked",
-    description: "Ticket requires human intervention",
-    workers: [],
-    transitions: { next: "Done", manual: true },
+    transitions: { next: template.phases[0]?.id || "Done", manual: true },
   };
 
   const donePhase: Phase = {
@@ -386,17 +381,9 @@ export async function getWorkflowWithFullPhases(
     transitions: { next: null },
   };
 
-  // Update last workflow phase to point to Blocked
-  const workflowPhases = template.phases.map((p, i) => {
-    if (i === template.phases.length - 1 && p.transitions.next === "Done") {
-      return { ...p, transitions: { ...p.transitions, next: "Blocked" } };
-    }
-    return p;
-  });
-
   return {
     ...template,
-    phases: [ideasPhase, ...workflowPhases, blockedPhase, donePhase],
+    phases: [ideasPhase, ...template.phases, donePhase],
   };
 }
 
@@ -671,21 +658,16 @@ export async function getTemplateWithFullPhasesForProject(
   const template = await getTemplateForProject(projectId);
   if (!template) return null;
 
-  // Inject Ideas at start, Blocked and Done at end
+  // Inject Ideas at start, Done at end. "Blocked" is no longer a phase -
+  // superseded by the per-ticket `blocked` flag (bright red outline,
+  // toggled in place), which doesn't strand a ticket out of its real
+  // position in the pipeline the way moving it to a separate column did.
   const ideasPhase: Phase = {
     id: "Ideas",
     name: "Ideas",
     description: "Tickets start here",
     workers: [],
-    transitions: { next: template.phases[0]?.id || "Blocked", manual: true },
-  };
-
-  const blockedPhase: Phase = {
-    id: "Blocked",
-    name: "Blocked",
-    description: "Ticket requires human intervention",
-    workers: [],
-    transitions: { next: "Done", manual: true },
+    transitions: { next: template.phases[0]?.id || "Done", manual: true },
   };
 
   const donePhase: Phase = {
@@ -696,17 +678,9 @@ export async function getTemplateWithFullPhasesForProject(
     transitions: { next: null },
   };
 
-  // Update last workflow phase to point to Blocked
-  const workflowPhases = template.phases.map((p, i) => {
-    if (i === template.phases.length - 1 && p.transitions.next === "Done") {
-      return { ...p, transitions: { ...p.transitions, next: "Blocked" } };
-    }
-    return p;
-  });
-
   return {
     ...template,
-    phases: [ideasPhase, ...workflowPhases, blockedPhase, donePhase],
+    phases: [ideasPhase, ...template.phases, donePhase],
   };
 }
 
